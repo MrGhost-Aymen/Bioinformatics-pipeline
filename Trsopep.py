@@ -1,5 +1,5 @@
 """
-Advanced Genomic Analysis Pipeline
+Advanced Genomic Analysis Pipeline By Trso
 
 This script performs comprehensive genomic analysis including BLAST queries, sequence alignment,
 phylogenetic analysis, and primer design with enhanced configuration management and error handling.
