@@ -1,0 +1,1 @@
+pip install biopython primer3 logomaker viennarna matplotlib seaborn clustalw
