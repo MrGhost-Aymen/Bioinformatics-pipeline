@@ -1,8 +1,0 @@
-# Basic usage with remote BLAST
-python pipeline.py input.fasta -o results --email user@example.com
-
-# Local BLAST with variant analysis
-python pipeline.py input.fasta --local_blast mydb --variants --threads 8
-
-# Resume failed run
-python pipeline.py input.fasta --resume
