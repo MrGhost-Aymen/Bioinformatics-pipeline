@@ -1,177 +1,134 @@
-```markdown
-# Advanced Genomic Analysis Pipeline Documentation
+#### Trso Advanced Genomic Analysis Pipeline
 
-## Overview
-A comprehensive genomic analysis pipeline performing:
-- BLAST sequence searches (remote/local)
-- GenBank sequence retrieval
-- Multiple sequence alignment (ClustalW)
-- Phylogenetic tree construction
-- Primer design (primer3)
-- Interactive HTML reporting
+**Description:**
+This script performs comprehensive genomic analysis, including BLAST queries, sequence alignment, phylogenetic analysis, primer design, variant calling, motif analysis, and sequence validation. It includes enhanced configuration management, error handling, and checkpointing to ensure robust and efficient execution.
 
-## Installation
-
-### Requirements
-- Python 3.8+
-- System dependencies:
-  - ClustalW2 (`sudo apt-get install clustalw`)
-  - BLAST+ (for local searches - `sudo apt-get install ncbi-blast+`)
-
-### Python Packages
+**Usage:**
 ```bash
-pip install biopython pyyaml primer3 logomaker matplotlib jinja2
+$ python script.py input.fasta --config config.yaml --output results
 ```
 
-## Usage
+**Expected Outputs:**
+- `results/report.html`: Interactive analysis report
+- `results/alignment.aln`: Multiple sequence alignment in ALN format
+- `results/alignment.fasta`: Multiple sequence alignment in FASTA format
+- `results/tree.nwk`: Phylogenetic tree in NEWICK format
+- `results/primers.json`: Designed primer sequences in JSON format
+- `results/variants.vcf`: SNP and indel calls in VCF format
+- `results/motifs.txt`: Detected motifs in TXT format
+- `results/fastqc_output/`: FastQC validation reports
 
-### Basic Execution
-```bash
-python script.py input.fasta --config config.yaml --output results
-```
+**Command-Line Arguments:**
 
-### Key Arguments
-| Argument          | Description                                  | Default       |
-|-------------------|----------------------------------------------|---------------|
-| `query`           | Input FASTA file or raw sequence            | Required      |
-| `--output`        | Output directory                            | `results`     |
-| `--config`        | Configuration file (YAML/JSON)              | Optional      |
-| `--local_blast`   | Path to local BLAST database                | Remote search |
-| `--max_hits`      | Maximum BLAST hits to process               | 50            |
-| `--threads`       | Parallel processing threads                 | 4             |
-| `--force`         | Overwrite existing results                  | False         |
-| `--resume`        | Resume from last checkpoint                 | False         |
+| Argument               | Description                                                                                       | Default             |
+|------------------------|---------------------------------------------------------------------------------------------------|---------------------|
+| `query`                | Input sequence or FASTA file path                                                                 |                     |
+| `-o`, `--output`       | Output directory                                                                                  | `results`           |
+| `--config`             | Path to YAML/JSON config file                                                                     |                     |
+| `--local_blast`        | Path to local BLAST database                                                                      |                     |
+| `--program`            | BLAST program                                                                                   | `blastn`            |
+| `--database`           | BLAST database                                                                                    | `nt`                |
+| `--max_hits`           | Maximum hits to process                                                                         | `50`                |
+| `--threads`            | Processing threads                                                                              | `4`                 |
+| `--force`              | Overwrite existing results                                                                      |                     |
+| `--e_value`            | E-value threshold for BLAST                                                                     | `1e-5`              |
+| `--score_threshold`    | Score threshold for BLAST                                                                       | `50`                |
+| `--keep_temp`          | Keep temporary files                                                                            |                     |
+| `--resume`             | Resume from checkpoint                                                                          |                     |
+| `--design_primers`     | Design primers for the query sequence                                                           |                     |
+| `--log_level`          | Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)                                           | `INFO`              |
+| `--email`              | NCBI email address                                                                              |                     |
+| `--call_variants`      | Call variants using bcftools                                                                    |                     |
+| `--reference`          | Reference genome for variant calling                                                            |                     |
+| `--find_motifs`        | Find motifs using MEME                                                                          |                     |
+| `--num_motifs`         | Number of motifs to find                                                                        | `5`                 |
+| `--min_motif_width`    | Minimum motif width                                                                             | `6`                 |
+| `--max_motif_width`    | Maximum motif width                                                                             | `12`                |
+| `--advanced_tree`      | Use IQ-TREE for advanced phylogenetic analysis                                                  |                     |
+| `--validate_sequence`  | Validate sequence using FastQC                                                                  |                     |
 
-### Example Config File (`config.yaml`)
+**Configuration File Example (`config.yaml`):**
 ```yaml
+output: results
+local_blast: /path/to/local/blastdb
 program: blastn
 database: nt
-e_value: 0.001
-max_hits: 100
-email: user@example.com
-primer_params:
-  size_range: [18, 25]
-  tm_temp: 60.0
+max_hits: 50
+threads: 4
+force: false
+e_value: 1e-5
+score_threshold: 50
+keep_temp: false
+resume: false
+design_primers: true
+log_level: INFO
+email: your.email@example.com
+call_variants: true
+reference: /path/to/reference.fasta
+find_motifs: true
+num_motifs: 5
+min_motif_width: 6
+max_motif_width: 12
+advanced_tree: true
+validate_sequence: true
 ```
 
-## Pipeline Components
+**Dependencies:**
+Ensure the following dependencies are installed in your environment. You can install them using the `requirements.txt` file.
 
-### 1. BLAST Search Module
-- Remote (NCBI) or local execution
-- XML result caching with SHA256 hashing
-- Configurable parameters:
-  - Program (`blastn`, `blastp`, etc.)
-  - Database (`nt`, `nr`, custom)
-  - E-value threshold
-  - Percent identity
-
-### 2. Sequence Retrieval
-- Parallel fetching from GenBank
-- FASTA format output
-- Entrez email validation
-
-### 3. Multiple Sequence Alignment
-- ClustalW2 implementation
-- Output formats: CLUSTAL, FASTA
-- Temp file cleanup option
-
-### 4. Phylogenetic Analysis
-- Distance matrix calculation
-- UPGMA/NJ tree construction
-- Newick format output
-
-### 5. Primer Design
-- primer3 binding parameters:
-  ```python
-  {
-      'PRIMER_OPT_SIZE': 20,
-      'PRIMER_MIN_SIZE': 18,
-      'PRIMER_MAX_SIZE': 25,
-      'PRIMER_OPT_TM': 60.0,
-      'PRIMER_MIN_TM': 58.0,
-      'PRIMER_MAX_TM': 62.0
-  }
-  ```
-- JSON output with primer details
-
-### 6. Reporting System
-- Interactive HTML report with:
-  - Sequence conservation logo
-  - Phylogenetic tree visualization
-  - Primer table
-  - BLAST summary statistics
-- Plotly integration for interactive elements
-
-## Input/Output Specifications
-
-### Input
-- FASTA file or raw nucleotide sequence
-- YAML/JSON configuration file (optional)
-
-### Output Structure
+**Requirements File (`requirements.txt`):**
 ```
-results/
-├── alignment.aln       # Multiple sequence alignment
-├── primers.json        # Designed primers in JSON format
-├── report.html         # Interactive analysis report
-├── local_blast.xml     # BLAST results (if local)
-├── blast_cache/        # Cached BLAST results
-└── pipeline.log        # Detailed execution log
+biopython
+numpy
+matplotlib
+pandas
+scipy
+jinja2
+logomaker
+primer3-py
+pyyaml
+plotly
+subprocess32
+fastqc
+meme
+iqtree
+bcftools
 ```
 
-## Checkpoint System
-- Automatic state preservation at key stages:
-  1. Initialization
-  2. BLAST completion
-  3. Sequence retrieval
-  4. Alignment
-  5. Tree construction
-  6. Primer design
-- Resume with `--resume` flag
-- JSON state storage in `checkpoint.json`
+**Installation:**
+1. Install Python dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-## Advanced Configuration
+2. Ensure external tools are installed and available in your PATH:
+   - `clustalw2`
+   - `blastn`
+   - `bcftools`
+   - `meme`
+   - `iqtree`
+   - `fastqc`
 
-### Environment Variables
-```bash
-export NCBI_EMAIL="user@institute.edu"  # Required for Entrez access
+**Example Workflow:**
+1. Prepare your input FASTA file (`input.fasta`).
+2. Create a configuration file (`config.yaml`) with desired parameters.
+3. Run the script:
+   ```bash
+   python script.py input.fasta --config config.yaml --output results
+   ```
+
+**Logging:**
+Logs are written to `results/pipeline.log` and also printed to the console. The log level can be adjusted using the `--log_level` argument.
+
+**Checkpointing:**
+The script uses checkpoints to resume from previous stages if interrupted. Use the `--resume` flag to continue from the last saved checkpoint.
+
+**Interactive Report:**
+The final report (`results/report.html`) includes interactive visualizations such as phylogenetic trees and sequence conservation logos.
+
 ```
 
-### Customizing Visualizations
-Modify the Jinja2 template in `VisualizationEngine.HTML_TEMPLATE` to:
-- Add custom CSS/JavaScript
-- Modify report layout
-- Integrate additional visualization libraries
-
-## Troubleshooting
-
-### Common Issues
-1. **Missing Dependencies**:
-   - Ensure ClustalW2 and BLAST+ are in PATH
-   - Verify Python package versions
-
-2. **NCBI Access Errors**:
-   - Validate Entrez email configuration
-   - Check API rate limits (3 requests/sec)
-
-3. **Alignment Failures**:
-   - Verify input sequence homogeneity
-   - Check ClustalW installation
-
-4. **Primer Design Warnings**:
-   - Adjust melting temperature parameters
-   - Modify product size ranges
-
-### Debugging Tips
-```bash
---log_level DEBUG     # Enable verbose logging
---keep_temp           # Preserve intermediate files
-```
-
-## License
-MIT License - See included LICENSE file
-
----
-
-This documentation covers key aspects of the genomic pipeline. For implementation details, refer to inline code comments and class docstrings.
-```
+### Notes:
+- Ensure that the external tools (`clustalw2`, `blastn`, `bcftools`, `meme`, `iqtree`, `fastqc`) are installed and available in your system's PATH.
+- The script assumes that the input FASTA file is correctly formatted and contains valid nucleotide sequences.
+- The `bcftools` and `fastqc` tools require their respective dependencies and configurations.
