@@ -170,6 +170,107 @@ The script performs comprehensive genomic analysis, including BLAST queries, seq
 ```bash
 $ python script.py input.fasta --config config.yaml --output results
 ```
+#### Example 2: Using a Configuration File
+```bash
+$ python script.py input.fasta --config config.yaml --output results
+```
+- **Input:** `input.fasta` (your query sequence or FASTA file)
+- **Configuration File:** `config.yaml` (contains various settings)
+- **Output Directory:** `results`
+
+### Advanced Usage
+
+#### Example 3: Specifying BLAST Program and Database
+```bash
+$ python script.py input.fasta --output results --program blastp --database swissprot
+```
+- **Input:** `input.fasta` (your query sequence or FASTA file)
+- **BLAST Program:** `blastp` (protein-protein BLAST)
+- **Database:** `swissprot`
+- **Output Directory:** `results`
+
+#### Example 4: Using Local BLAST Database
+```bash
+$ python script.py input.fasta --output results --local_blast /path/to/local/blastdb --program blastx
+```
+- **Input:** `input.fasta` (your query sequence or FASTA file)
+- **Local BLAST Database:** `/path/to/local/blastdb`
+- **BLAST Program:** `blastx` (translated nucleotide-protein BLAST)
+- **Output Directory:** `results`
+
+#### Example 5: Enabling Advanced Features
+```bash
+$ python script.py input.fasta --output results --config config.yaml --call_variants --reference reference.fasta --find_motifs --advanced_tree --validate_sequence
+```
+- **Input:** `input.fasta` (your query sequence or FASTA file)
+- **Configuration File:** `config.yaml` (contains various settings)
+- **Variant Calling:** Enabled with `bcftools` using `reference.fasta`
+- **Motif Analysis:** Enabled with `meme`
+- **Advanced Phylogenetic Analysis:** Enabled with `iqtree`
+- **Sequence Validation:** Enabled with `fastqc`
+- **Output Directory:** `results`
+
+#### Example 6: Resuming a Previous Run
+```bash
+$ python script.py input.fasta --output results --resume
+```
+- **Input:** `input.fasta` (your query sequence or FASTA file)
+- **Output Directory:** `results`
+- **Resume:** Continues from the last saved checkpoint
+
+#### Example 7: Force Rerunning the Pipeline
+```bash
+$ python script.py input.fasta --output results --force
+```
+- **Input:** `input.fasta` (your query sequence or FASTA file)
+- **Output Directory:** `results`
+- **Force Rerun:** Overwrites existing results and reruns the entire pipeline
+
+### Configuration File Example (`config.yaml`)
+
+Here's an example of what the `config.yaml` file might look like:
+
+```yaml
+output: results
+local_blast: /path/to/local/blastdb
+program: blastn
+database: nt
+max_hits: 50
+threads: 4
+force: false
+e_value: 1e-5
+score_threshold: 50
+keep_temp: false
+resume: false
+design_primers: true
+log_level: INFO
+email: your.email@example.com
+call_variants: true
+reference: /path/to/reference.fasta
+find_motifs: true
+num_motifs: 5
+min_motif_width: 6
+max_motif_width: 12
+advanced_tree: true
+validate_sequence: true
+```
+
+### Detailed Example with All Features
+
+#### Example 8: Comprehensive Run with All Advanced Features
+```bash
+$ python script.py input.fasta --config config.yaml --output results --program blastx --local_blast /path/to/local/blastdb --call_variants --reference reference.fasta --find_motifs --advanced_tree --validate_sequence --design_primers
+```
+- **Input:** `input.fasta` (your query sequence or FASTA file)
+- **Configuration File:** `config.yaml` (contains various settings)
+- **BLAST Program:** `blastx` (translated nucleotide-protein BLAST)
+- **Local BLAST Database:** `/path/to/local/blastdb`
+- **Variant Calling:** Enabled with `bcftools` using `reference.fasta`
+- **Motif Analysis:** Enabled with `meme`
+- **Advanced Phylogenetic Analysis:** Enabled with `iqtree`
+- **Sequence Validation:** Enabled with `fastqc`
+- **Primer Design:** Enabled with `primer3`
+- **Output Directory:** `results`
 
 #### **Expected Outputs:**
 
