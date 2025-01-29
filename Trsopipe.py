@@ -19,7 +19,6 @@ import hashlib
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from io import StringIO
 from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
@@ -340,6 +339,59 @@ class SequenceValidator:
         subprocess.run(fastqc_cmd, shell=True, check=True)
         return fastqc_output_dir
 
+class TreeVisualizer:
+    """Generates interactive phylogenetic tree visualizations"""
+    @staticmethod
+    def generate_interactive_tree(newick_str):
+        """Generate Plotly-based phylogenetic tree visualization"""
+        if not newick_str:
+            return "Interactive tree placeholder"
+        tree = Phylo.read(StringIO(newick_str), "newick")
+        fig = go.Figure(data=[go.Scatter(
+            x=[],
+            y=[],
+            mode='markers+lines',
+            text=[],
+            hoverinfo='text',
+            marker=dict(color='blue', size=10)
+        )])
+
+        def draw_clade(clade, parent_x, parent_y, depth):
+            x_values = [parent_x]
+            y_values = [parent_y]
+            clade_x = parent_x + 1
+            clade_y = parent_y - depth
+            x_values.append(clade_x)
+            y_values.append(clade_y)
+            fig.data[0].x += tuple(x_values)
+            fig.data[0].y += tuple(y_values)
+            fig.data[0].text += (clade.name,)
+            if clade.clades:
+                for subclade in clade.clades:
+                    draw_clade(subclade, clade_x, clade_y, depth + 1)
+
+        draw_clade(tree.root, 0, 0, 0)
+        fig.update_layout(title='Phylogenetic Tree', showlegend=False)
+        return fig.to_html(full_html=False)
+
+class LogoGenerator:
+    """Generates sequence conservation logos"""
+    @staticmethod
+    def generate_conservation_logo(alignment):
+        """Generate sequence logo using logomaker"""
+        try:
+            logo_path = Path(args.output) / "logo.png"
+            df = logomaker.alignment_to_matrix([str(rec.seq) for rec in alignment])
+            plt.figure(figsize=(20, 5))
+            logomaker.Logo(df)
+            plt.savefig(logo_path)
+            plt.close()
+            with open(logo_path, "rb") as f:
+                return base64.b64encode(f.read()).decode()
+        except Exception as e:
+            logger.error(f"Logo generation failed: {e}")
+            return None
+
 class VisualizationEngine:
     """Generates interactive HTML reports with visualization components"""
     HTML_TEMPLATE = """
@@ -384,8 +436,8 @@ class VisualizationEngine:
         logger.info("Compiling final report")
         report_path = Path(args.output) / "report.html"
         # Generate visualization assets
-        logo_img = VisualizationEngine._generate_conservation_logo(results['alignment'])
-        tree_html = VisualizationEngine._generate_interactive_tree(results.get('tree_newick'))
+        logo_img = LogoGenerator.generate_conservation_logo(results['alignment'])
+        tree_html = TreeVisualizer.generate_interactive_tree(results.get('tree_newick'))
         # Render template
         template = Template(VisualizationEngine.HTML_TEMPLATE)
         html = template.render(
@@ -400,55 +452,6 @@ class VisualizationEngine:
         with open(report_path, "w") as f:
             f.write(html)
         return report_path
-
-    @staticmethod
-    def _generate_conservation_logo(alignment):
-        """Generate sequence logo using logomaker"""
-        try:
-            logo_path = Path(args.output) / "logo.png"
-            df = logomaker.alignment_to_matrix([str(rec.seq) for rec in alignment])
-            plt.figure(figsize=(20, 5))
-            logomaker.Logo(df)
-            plt.savefig(logo_path)
-            plt.close()
-            with open(logo_path, "rb") as f:
-                return base64.b64encode(f.read()).decode()
-        except Exception as e:
-            logger.error(f"Logo generation failed: {e}")
-            return None
-
-    @staticmethod
-    def _generate_interactive_tree(newick_str):
-        """Generate Plotly-based phylogenetic tree visualization"""
-        if not newick_str:
-            return "Interactive tree placeholder"
-        tree = Phylo.read(StringIO(newick_str), "newick")
-        fig = go.Figure(data=[go.Scatter(
-            x=[],
-            y=[],
-            mode='markers+lines',
-            text=[],
-            hoverinfo='text',
-            marker=dict(color='blue', size=10)
-        )])
-
-        def draw_clade(clade, parent_x, parent_y, depth):
-            x_values = [parent_x]
-            y_values = [parent_y]
-            clade_x = parent_x + 1
-            clade_y = parent_y - depth
-            x_values.append(clade_x)
-            y_values.append(clade_y)
-            fig.data[0].x += tuple(x_values)
-            fig.data[0].y += tuple(y_values)
-            fig.data[0].text += (clade.name,)
-            if clade.clades:
-                for subclade in clade.clades:
-                    draw_clade(subclade, clade_x, clade_y, depth + 1)
-
-        draw_clade(tree.root, 0, 0, 0)
-        fig.update_layout(title='Phylogenetic Tree', showlegend=False)
-        return fig.to_html(full_html=False)
 
 class AnalysisPipeline:
     """Main analysis pipeline orchestrator"""
