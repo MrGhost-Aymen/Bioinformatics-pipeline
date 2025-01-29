@@ -8,8 +8,6 @@ Example:
     - results/report.html: Interactive analysis report
     - results/alignment.aln: Multiple sequence alignment
     - results/primers.json: Designed primer sequences
-    - results/variants.vcf: SNP and indel calls
-    - results/motifs.txt: Detected motifs
 """
 import argparse
 import base64
@@ -30,7 +28,7 @@ from Bio import SeqIO, Entrez, Phylo, AlignIO
 from Bio.Align import MultipleSeqAlignment, AlignInfo
 from Bio.Align.Applications import ClustalwCommandline
 from Bio.Blast import NCBIWWW, NCBIXML
-from Bio.Blast.Applications import NcbiblastnCommandline
+from Bio.Blast.Applications import NcbiblastnCommandline, NcbiblastxCommandline, NcbiblastpCommandline
 from Bio.Phylo.TreeConstruction import DistanceTreeConstructor, DistanceMatrix
 from jinja2 import Template
 import primer3
@@ -192,15 +190,36 @@ class BlastRunner:
         # Validate database path
         if not Path(args.local_blast).exists():
             raise FileNotFoundError(f"BLAST database {args.local_blast} not found")
-        blastn_cline = NcbiblastnCommandline(
-            query=query,
-            db=args.local_blast,
-            outfmt=5,
-            out=output_file,
-            num_threads=args.threads
-        )
-        logger.info(f"Executing: {blastn_cline}")
-        stdout, stderr = blastn_cline()
+        blast_cline = None
+        if args.program == "blastn":
+            blast_cline = NcbiblastnCommandline(
+                query=query,
+                db=args.local_blast,
+                outfmt=5,
+                out=output_file,
+                num_threads=args.threads
+            )
+        elif args.program == "blastx":
+            blast_cline = NcbiblastxCommandline(
+                query=query,
+                db=args.local_blast,
+                outfmt=5,
+                out=output_file,
+                num_threads=args.threads
+            )
+        elif args.program == "blastp":
+            blast_cline = NcbiblastpCommandline(
+                query=query,
+                db=args.local_blast,
+                outfmt=5,
+                out=output_file,
+                num_threads=args.threads
+            )
+        else:
+            raise ValueError(f"Unsupported BLAST program: {args.program}")
+
+        logger.info(f"Executing: {blast_cline}")
+        stdout, stderr = blast_cline()
         if stderr:
             logger.error(f"BLAST error: {stderr}")
             raise RuntimeError(stderr)
@@ -249,7 +268,7 @@ class SequenceAnalyzer:
             "clustalw2",
             infile=input_file,
             outfile=output_file,
-            type="dna",
+            type="protein" if args.program in ["blastx", "blastp"] else "dna",
             quicktree=True
         )
         logger.info(f"Executing: {clustalw_cline}")
@@ -257,6 +276,19 @@ class SequenceAnalyzer:
         if not args.keep_temp:
             input_file.unlink(missing_ok=True)
         return AlignIO.read(output_file, "clustal")
+
+    @staticmethod
+    def translate_sequences(sequences):
+        """Translate nucleotide sequences to protein sequences"""
+        translated_sequences = []
+        for seq_record in sequences:
+            try:
+                translated_seq = seq_record.seq.translate(to_stop=True)
+                translated_record = SeqIO.SeqRecord(translated_seq, id=seq_record.id, description=seq_record.description)
+                translated_sequences.append(translated_record)
+            except Exception as e:
+                logger.warning(f"Translation failed for {seq_record.id}: {e}")
+        return translated_sequences
 
 class VariantCaller:
     """Handles variant calling using external tools like bcftools"""
@@ -290,7 +322,7 @@ class PhylogeneticAnalyzer:
     def construct_tree(alignment_file, args):
         """Construct phylogenetic tree using IQ-TREE"""
         tree_file = Path(args.output) / "tree.nwk"
-        iqtree_cmd = f"iqtree -s {alignment_file} -st DNA -pre {tree_file.stem} -nt AUTO"
+        iqtree_cmd = f"iqtree -s {alignment_file} -st PROTEIN -pre {tree_file.stem} -nt AUTO"
         logger.info(f"Executing phylogenetic tree construction: {iqtree_cmd}")
         subprocess.run(iqtree_cmd, shell=True, check=True)
         with open(tree_file) as f:
@@ -450,6 +482,8 @@ class AnalysisPipeline:
             blast_hits = self._run_blast(query_seq)
             sequences = self._process_hits(blast_hits)
             self.state.save('fetch', {'sequences': len(sequences)})
+            if self.args.program in ["blastx", "blastp"]:
+                sequences = SequenceAnalyzer.translate_sequences(sequences)
             alignment = self._align_sequences(sequences)
             self.state.save('align', {'alignment': str(alignment)})
             self._analyze_alignment(alignment)
@@ -475,6 +509,8 @@ class AnalysisPipeline:
         required = {'clustalw2': 'ClustalW required for alignment'}
         if self.args.local_blast:
             required['blastn'] = 'BLAST+ required for local searches'
+            required['blastx'] = 'BLAST+ required for local BLASTX searches'
+            required['blastp'] = 'BLAST+ required for local BLASTP searches'
         if self.args.call_variants:
             required['bcftools'] = 'bcftools required for variant calling'
         if self.args.find_motifs:
@@ -650,7 +686,7 @@ def main():
     parser.add_argument("--config", help="Path to YAML/JSON config file")
     # BLAST parameters
     parser.add_argument("--local_blast", help="Path to local BLAST database")
-    parser.add_argument("--program", default="blastn", help="BLAST program")
+    parser.add_argument("--program", choices=["blastn", "blastx", "blastp"], default="blastn", help="BLAST program")
     parser.add_argument("--database", default="nt", help="BLAST database")
     # Advanced parameters
     parser.add_argument("--max_hits", type=int, default=50, help="Maximum hits to process")
