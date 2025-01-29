@@ -1,1 +1,15 @@
-pip install biopython primer3 logomaker jinja2 matplotlib viennarna clustalw
+biopython
+numpy
+matplotlib
+pandas
+scipy
+jinja2
+logomaker
+primer3-py
+pyyaml
+plotly
+subprocess32
+fastqc
+meme
+iqtree
+bcftools
