@@ -129,6 +129,7 @@ The final report (`results/report.html`) includes interactive visualizations suc
 ```
 
 ### Notes:
-- Ensure that the external tools (`clustalw2`, `blastn`, `bcftools`, `meme`, `iqtree`, `fastqc`) are installed and available in your system's PATH.
-- The script assumes that the input FASTA file is correctly formatted and contains valid nucleotide sequences.
-- The `bcftools` and `fastqc` tools require their respective dependencies and configurations.
+    Ensure that the external tools (clustalw2, blastn, blastx, blastp, bcftools, meme, iqtree, fastqc) are installed and available in your system's PATH.
+    The script assumes that the input FASTA file is correctly formatted and contains valid nucleotide sequences.
+    The bcftools and fastqc tools require their respective dependencies and configurations.
+     
