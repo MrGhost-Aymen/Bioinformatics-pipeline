@@ -1,14 +1,4 @@
-"""
-Advanced Genomic Analysis Pipeline By Trso
-This script performs comprehensive genomic analysis including BLAST queries, sequence alignment,
-phylogenetic analysis, and primer design with enhanced configuration management and error handling.
-Example:
-    $ python Trsopipe1.py NC_045512 --output results --email user@example.com --reference NC_009848
-    Expected outputs:
-    - results/report.html: Interactive analysis report
-    - results/alignment.aln: Multiple sequence alignment
-    - results/primers.json: Designed primer sequences
-"""
+from io import StringIO
 import argparse
 import base64
 import json
@@ -35,12 +25,12 @@ from Bio.Seq import Seq
 from collections import defaultdict
 import plotly.graph_objects as go
 import subprocess
+import time
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
-__version__ = "1.0.3"  # Updated version
-
+__version__ = "1.0.4"  # Updated version
 
 class PipelineState:
     """Manages pipeline checkpoints and state recovery."""
@@ -83,7 +73,6 @@ class PipelineState:
         with open(self.checkpoint_file, "w") as f:
             json.dump(self.state, f, indent=2)
 
-
 class ConfigManager:
     """Handles configuration loading from file and command-line."""
     @staticmethod
@@ -101,7 +90,6 @@ class ConfigManager:
                 logger.warning(f"Ignoring unknown config key: {key}")
         return args
 
-
 class NcbiHandler:
     """Manages NCBI Entrez interactions and credentials."""
     @staticmethod
@@ -111,7 +99,6 @@ class NcbiHandler:
         if not Entrez.email:
             raise ValueError("NCBI email required. Set via --email or NCBI_EMAIL env var")
         logger.info(f"Using NCBI email: {Entrez.email}")
-
 
 class BlastRunner:
     """Handles BLAST searches with local/remote execution and caching."""
@@ -167,6 +154,7 @@ class BlastRunner:
         """Execute remote BLAST via NCBI WWW service."""
         logger.info("Running remote BLAST via NCBI...")
         try:
+            time.sleep(0.34)  # Rate limit: ~3 requests/sec without API key
             return NCBIWWW.qblast(
                 args.program,
                 args.database,
@@ -220,7 +208,6 @@ class BlastRunner:
             raise RuntimeError(stderr)
         return open(output_file)
 
-
 class SequenceAnalyzer:
     """Handles sequence fetching, alignment, and analysis."""
     @staticmethod
@@ -239,14 +226,17 @@ class SequenceAnalyzer:
                     logger.debug(f"Fetched {result.id}")
                 else:
                     logger.warning("Failed to fetch sequence")
-        return results
+                time.sleep(0.34)  # Rate limit for NCBI compliance
+            return results
 
     @staticmethod
     def _fetch_single(hit_id):
         """Fetch single sequence from GenBank."""
         try:
             handle = Entrez.efetch(db="nucleotide", id=hit_id, rettype="fasta", retmode="text")
-            return SeqIO.read(handle, "fasta")
+            record = SeqIO.read(handle, "fasta")
+            handle.close()
+            return record
         except Exception as e:
             logger.error(f"Failed to fetch {hit_id}: {e}")
             return None
@@ -257,32 +247,19 @@ class SequenceAnalyzer:
         if not sequences:
             raise ValueError("No sequences available for alignment")
         logger.info(f"Aligning {len(sequences)} sequences using MUSCLE")
-
-        # Write input sequences to a temporary FASTA file
         input_file = Path(args.output) / "alignment_input.fasta"
         output_file = Path(args.output) / "alignment.aln"
         SeqIO.write(sequences, input_file, "fasta")
-
-        # Construct the MUSCLE command
-        muscle_cmd = [
-            "muscle",
-            "-in", str(input_file),
-            "-out", str(output_file)
-        ]
+        muscle_cmd = ["muscle", "-in", str(input_file), "-out", str(output_file)]
         logger.info(f"Executing: {' '.join(muscle_cmd)}")
-
         try:
-            # Run MUSCLE using subprocess
             subprocess.run(muscle_cmd, check=True)
         except subprocess.CalledProcessError as e:
             logger.error(f"MUSCLE failed with error: {e}")
             raise RuntimeError("MUSCLE execution failed.")
         finally:
-            # Optionally remove the temporary input file if not needed
             if not args.keep_temp:
                 input_file.unlink(missing_ok=True)
-
-        # Read and return the alignment
         return AlignIO.read(output_file, "fasta")
 
     @staticmethod
@@ -298,18 +275,22 @@ class SequenceAnalyzer:
                 logger.warning(f"Translation failed for {seq_record.id}: {e}")
         return translated_sequences
 
-
 class VariantCaller:
     """Handles variant calling using external tools like bcftools."""
     @staticmethod
     def call_variants(reference, bam_file, args):
         """Call variants using bcftools."""
         vcf_file = Path(args.output) / "variants.vcf"
-        bcftools_cmd = f"bcftools mpileup -Ou -f {reference} {bam_file} | bcftools call -mv -Ov -o {vcf_file}"
-        logger.info(f"Executing variant calling: {bcftools_cmd}")
-        subprocess.run(bcftools_cmd, shell=True, check=True)
+        mpileup_cmd = ["bcftools", "mpileup", "-Ou", "-f", str(reference), str(bam_file)]
+        call_cmd = ["bcftools", "call", "-mv", "-Ov", "-o", str(vcf_file)]
+        logger.info(f"Executing variant calling: mpileup -> call")
+        try:
+            mpileup = subprocess.run(mpileup_cmd, capture_output=True, check=True)
+            subprocess.run(call_cmd, input=mpileup.stdout, check=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Variant calling failed: {e}")
+            raise RuntimeError("Variant calling execution failed.")
         return vcf_file
-
 
 class MotifAnalyzer:
     """Handles motif analysis using external tools like MEME."""
@@ -318,14 +299,21 @@ class MotifAnalyzer:
         """Find motifs using MEME."""
         meme_output_dir = Path(args.output) / "meme_output"
         meme_output_dir.mkdir(exist_ok=True)
-        meme_cmd = f"meme {fasta_file} -oc {meme_output_dir} -nmotifs {args.num_motifs} -minw {args.min_motif_width} -maxw {args.max_motif_width}"
-        logger.info(f"Executing motif analysis: {meme_cmd}")
-        subprocess.run(meme_cmd, shell=True, check=True)
+        meme_cmd = [
+            "meme", str(fasta_file), "-oc", str(meme_output_dir),
+            "-nmotifs", str(args.num_motifs), "-minw", str(args.min_motif_width),
+            "-maxw", str(args.max_motif_width)
+        ]
+        logger.info(f"Executing motif analysis: {' '.join(meme_cmd)}")
+        try:
+            subprocess.run(meme_cmd, check=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(f"MEME failed with error: {e}")
+            raise RuntimeError("MEME execution failed.")
         motifs_file = meme_output_dir / "meme.txt"
         with open(motifs_file) as f:
             motifs = f.read()
         return motifs
-
 
 class PhylogeneticAnalyzer:
     """Handles advanced phylogenetic analysis using IQ-TREE."""
@@ -333,13 +321,19 @@ class PhylogeneticAnalyzer:
     def construct_tree(alignment_file, args):
         """Construct phylogenetic tree using IQ-TREE."""
         tree_file = Path(args.output) / "tree.nwk"
-        iqtree_cmd = f"iqtree -s {alignment_file} -st PROTEIN -pre {tree_file.stem} -nt AUTO"
-        logger.info(f"Executing phylogenetic tree construction: {iqtree_cmd}")
-        subprocess.run(iqtree_cmd, shell=True, check=True)
+        iqtree_cmd = [
+            "iqtree", "-s", str(alignment_file), "-st", "PROTEIN",
+            "-pre", str(tree_file.stem), "-nt", "AUTO"
+        ]
+        logger.info(f"Executing phylogenetic tree construction: {' '.join(iqtree_cmd)}")
+        try:
+            subprocess.run(iqtree_cmd, check=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(f"IQ-TREE failed with error: {e}")
+            raise RuntimeError("IQ-TREE execution failed.")
         with open(tree_file) as f:
             tree_newick = f.read()
         return tree_newick
-
 
 class SequenceValidator:
     """Handles sequence validation using FastQC."""
@@ -349,10 +343,7 @@ class SequenceValidator:
         fastqc_output_dir = Path(args.output) / "fastqc_output"
         fastqc_output_dir.mkdir(exist_ok=True)
         fastqc_cmd = [
-            "fastqc",
-            str(fasta_file),
-            "-o", str(fastqc_output_dir),
-            "--extract"
+            "fastqc", str(fasta_file), "-o", str(fastqc_output_dir), "--extract"
         ]
         logger.info(f"Executing sequence validation: {' '.join(fastqc_cmd)}")
         try:
@@ -362,7 +353,6 @@ class SequenceValidator:
             logger.error(f"FastQC failed with error: {e}")
             raise RuntimeError("FastQC execution failed.")
 
-
 class TreeVisualizer:
     """Generates interactive phylogenetic tree visualizations."""
     @staticmethod
@@ -370,34 +360,40 @@ class TreeVisualizer:
         """Generate Plotly-based phylogenetic tree visualization."""
         if not newick_str:
             return "Interactive tree placeholder"
-        tree = Phylo.read(StringIO(newick_str), "newick")
-        fig = go.Figure(data=[go.Scatter(
-            x=[],
-            y=[],
-            mode='markers+lines',
-            text=[],
-            hoverinfo='text',
-            marker=dict(color='blue', size=10)
-        )])
+        try:
+            tree = Phylo.read(StringIO(newick_str), "newick")
+            fig = go的比例(
+                x=[],
+                y=[],
+                mode='markers+lines',
+                text=[],
+                hoverinfo='text',
+                marker=dict(color='blue', size=10)
+            )])
 
-        def draw_clade(clade, parent_x, parent_y, depth):
-            x_values = [parent_x]
-            y_values = [parent_y]
-            clade_x = parent_x + 1
-            clade_y = parent_y - depth
-            x_values.append(clade_x)
-            y_values.append(clade_y)
-            fig.data[0].x += tuple(x_values)
-            fig.data[0].y += tuple(y_values)
-            fig.data[0].text += (clade.name,)
-            if clade.clades:
-                for subclade in clade.clades:
-                    draw_clade(subclade, clade_x, clade_y, depth + 1)
+            def draw_clade(clade, parent_x, parent_y, depth, y_offset=0):
+                x_values = [parent_x]
+                y_values = [parent_y]
+                clade_x = parent_x + 1
+                clade_y = y_offset - depth
+                x_values.append(clade_x)
+                y_values.append(clade_y)
+                name = clade.name if clade.name else "Internal Node"
+                fig.data[0].x += tuple(x_values)
+                fig.data[0].y += tuple(y_values)
+                fig.data[0].text += (name,)
+                if clade.clades:
+                    n_clades = len(clade.clades)
+                    for i, subclade in enumerate(clade.clades):
+                        child_y_offset = y_offset + (n_clades - 1) / 2 - i
+                        draw_clade(subclade, clade_x, clade_y, depth + 1, child_y_offset)
 
-        draw_clade(tree.root, 0, 0, 0)
-        fig.update_layout(title='Phylogenetic Tree', showlegend=False)
-        return fig.to_html(full_html=False)
-
+            draw_clade(tree.root, 0, 0, 0)
+            fig.update_layout(title='Phylogenetic Tree', showlegend=False, autosize=True)
+            return fig.to_html(full_html=False)
+        except Exception as e:
+            logger.error(f"Tree visualization failed: {e}")
+            return "Failed to generate interactive tree"
 
 class LogoGenerator:
     """Generates sequence conservation logos."""
@@ -417,7 +413,6 @@ class LogoGenerator:
             logger.error(f"Logo generation failed: {e}")
             return None
 
-
 class VisualizationEngine:
     """Generates interactive HTML reports with visualization components."""
     HTML_TEMPLATE = """
@@ -425,17 +420,27 @@ class VisualizationEngine:
 <html>
 <head>
     <title>Genomic Analysis Report</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h1, h2 { color: #2c3e50; }
+        pre { background: #f4f4f4; padding: 10px; border-radius: 5px; }
+        img { max-width: 100%; }
+    </style>
 </head>
 <body>
     <h1>Genomic Analysis Report</h1>
     <h2>Phylogenetic Tree</h2>
-    {{ tree_html }}
+    {{ tree_html | safe }}
     <h2>Sequence Conservation Logo</h2>
-    <img src="data:image/png;base64,{{ logo_img }}" alt="Conservation Logo">
+    {% if logo_img %}
+        <img src="data:image/png;base64,{{ logo_img }}" alt="Conservation Logo">
+    {% else %}
+        <p>No conservation logo generated.</p>
+    {% endif %}
     <h2>Designed Primers</h2>
     <ul>
         {% for primer in primers %}
-        <li>{{ primer }}</li>
+        <li>Forward: {{ primer.forward }} | Reverse: {{ primer.reverse }}</li>
         {% endfor %}
     </ul>
     <h2>Variants</h2>
@@ -469,7 +474,6 @@ class VisualizationEngine:
         with open(report_path, "w") as f:
             f.write(html)
         return report_path
-
 
 class AnalysisPipeline:
     """Main analysis pipeline orchestrator."""
@@ -527,7 +531,11 @@ class AnalysisPipeline:
         """Validate dependencies and environment setup."""
         Path(self.args.output).mkdir(exist_ok=True)
         NcbiHandler.set_email(self.args.email)
-        required = {'muscle': 'MUSCLE required for alignment'}
+        required = {
+            'muscle': 'MUSCLE required for alignment',
+            'samtools': 'samtools required for BAM file generation',
+            'minimap2': 'minimap2 required for mapping to reference'
+        }
         if self.args.local_blast:
             required['blastn'] = 'BLAST+ required for local searches'
             required['blastx'] = 'BLAST+ required for local BLASTX searches'
@@ -546,7 +554,7 @@ class AnalysisPipeline:
 
     def _load_query(self, query):
         """Load and validate input query sequence."""
-        if Path(query).exists():  # If it's a file path
+        if Path(query).exists():
             try:
                 record = SeqIO.read(Path(query), "fasta")
                 self.results['summary']['query'] = {
@@ -557,7 +565,7 @@ class AnalysisPipeline:
                 return str(record.seq)
             except Exception as e:
                 raise ValueError(f"Invalid FASTA file: {e}")
-        elif query.startswith("https://") or query.startswith("ftp://"):  # If it's a URL
+        elif query.startswith("https://") or query.startswith("ftp://"):
             logger.info(f"Downloading query sequence from URL: {query}")
             response = subprocess.run(["curl", "-sL", query], capture_output=True, text=True)
             if response.returncode != 0:
@@ -572,7 +580,7 @@ class AnalysisPipeline:
                 return str(record.seq)
             except Exception as e:
                 raise ValueError(f"Invalid sequence downloaded from URL: {e}")
-        else:  # Assume it's an accession number
+        else:
             logger.info(f"Fetching query sequence by accession number: {query}")
             try:
                 handle = Entrez.efetch(db="nucleotide", id=query, rettype="fasta", retmode="text")
@@ -643,20 +651,18 @@ class AnalysisPipeline:
         """Call variants using bcftools."""
         if not self.args.reference:
             raise ValueError("Reference genome required for variant calling")
-
         reference = self.args.reference
         reference_file = Path(self.args.output) / "reference.fasta"
-
-        if Path(reference).exists():  # If it's a file path
+        if Path(reference).exists():
             reference_file = Path(reference)
-        elif reference.startswith("https://") or reference.startswith("ftp://"):  # If it's a URL
+        elif reference.startswith("https://") or reference.startswith("ftp://"):
             logger.info(f"Downloading reference genome from URL: {reference}")
             response = subprocess.run(["curl", "-sL", reference], capture_output=True, text=True)
             if response.returncode != 0:
                 raise ValueError(f"Failed to download reference genome from URL: {response.stderr}")
             with open(reference_file, "w") as f:
                 f.write(response.stdout)
-        else:  # Assume it's an accession number
+        else:
             logger.info(f"Fetching reference genome by accession number: {reference}")
             try:
                 handle = Entrez.efetch(db="nucleotide", id=reference, rettype="fasta", retmode="text")
@@ -664,13 +670,20 @@ class AnalysisPipeline:
                     f.write(handle.read())
             except Exception as e:
                 raise ValueError(f"Failed to fetch reference genome by accession number: {e}")
-
         if not reference_file.exists():
             raise FileNotFoundError(f"Reference file {reference_file} not found")
-
         fasta_file = Path(self.args.output) / "alignment.fasta"
         AlignIO.write(alignment, fasta_file, "fasta")
         bam_file = Path(self.args.output) / "alignment.bam"
+        sam_cmd = ["minimap2", "-a", str(reference_file), str(fasta_file)]
+        view_cmd = ["samtools", "view", "-bS", "-o", str(bam_file)]
+        logger.info(f"Generating BAM file: minimap2 -> samtools")
+        try:
+            sam = subprocess.run(sam_cmd, capture_output=True, check=True)
+            subprocess.run(view_cmd, input=sam.stdout, check=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(f"BAM generation failed: {e}")
+            raise RuntimeError("BAM file generation failed.")
         self.results['variants'] = VariantCaller.call_variants(reference_file, bam_file, self.args)
 
     def _find_motifs(self, alignment):
@@ -689,30 +702,34 @@ class AnalysisPipeline:
     def _design_primers(self, query_seq):
         """Design primers for the query sequence."""
         logger.info("Designing primers")
-        primer_results = primer3.bindings.designPrimers(
-            {
-                'SEQUENCE_ID': 'Query',
-                'SEQUENCE_TEMPLATE': query_seq,
-                'PRIMER_OPT_SIZE': 20,
-                'PRIMER_MIN_SIZE': 18,
-                'PRIMER_MAX_SIZE': 25,
-                'PRIMER_OPT_TM': 60.0,
-                'PRIMER_MIN_TM': 57.0,
-                'PRIMER_MAX_TM': 63.0,
-                'PRIMER_MAX_GC': 50.0,
-                'PRIMER_MIN_GC': 20.0,
-                'PRIMER_MAX_LIBRARY_MISPRIMING': 8.0,
-                'PRIMER_PAIR_MAX_LIBRARY_MISPRIMING': 8.0,
-                'PRIMER_PRODUCT_SIZE_RANGE': [[100, 300]]
-            },
-            {}
-        )
-        self.results['primers'] = [
-            {
-                'forward': primer_results['PRIMER_LEFT_0_SEQUENCE'],
-                'reverse': primer_results['PRIMER_RIGHT_0_SEQUENCE']
-            }
-        ]
+        try:
+            primer_results = primer3.bindings.designPrimers(
+                {
+                    'SEQUENCE_ID': 'Query',
+                    'SEQUENCE_TEMPLATE': query_seq,
+                    'PRIMER_OPT_SIZE': 20,
+                    'PRIMER_MIN_SIZE': 18,
+                    'PRIMER_MAX_SIZE': 25,
+                    'PRIMER_OPT_TM': 60.0,
+                    'PRIMER_MIN_TM': 57.0,
+                    'PRIMER_MAX_TM': 63.0,
+                    'PRIMER_MAX_GC': 50.0,
+                    'PRIMER_MIN_GC': 20.0,
+                    'PRIMER_MAX_LIBRARY_MISPRIMING': 8.0,
+                    'PRIMER_PAIR_MAX_LIBRARY_MISPRIMING': 8.0,
+                    'PRIMER_PRODUCT_SIZE_RANGE': [[100, 300]]
+                },
+                {}
+            )
+            self.results['primers'] = [
+                {
+                    'forward': primer_results['PRIMER_LEFT_0_SEQUENCE'],
+                    'reverse': primer_results['PRIMER_RIGHT_0_SEQUENCE']
+                }
+            ]
+        except Exception as e:
+            logger.error(f"Primer design failed: {e}")
+            self.results['primers'] = []
 
     def _generate_outputs(self):
         """Generate additional output files."""
@@ -725,7 +742,7 @@ class AnalysisPipeline:
             json.dump(self.results['primers'], f, indent=2)
         if self.results.get('variants'):
             with open(Path(self.args.output) / "variants.vcf", "w") as f:
-                f.write(self.results['variants'])
+                f.write(str(self.results['variants']))
         if self.results.get('motifs'):
             with open(Path(self.args.output) / "motifs.txt", "w") as f:
                 f.write(self.results['motifs'])
@@ -736,7 +753,6 @@ class AnalysisPipeline:
             cache_dir = Path(self.args.output) / BlastRunner.CACHE_DIR
             if cache_dir.exists():
                 shutil.rmtree(cache_dir)
-
 
 def main():
     """Command-line interface and main execution flow."""
@@ -783,15 +799,12 @@ def main():
 
     args = parser.parse_args()
 
-    # Load configuration file if specified
     if args.config:
         args = ConfigManager.load(args.config, args)
 
-    # Ensure output directory exists
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Configure logging
     log_level = logging.DEBUG if args.verbose else getattr(logging, args.log_level.upper())
     log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     logging.basicConfig(
@@ -803,11 +816,10 @@ def main():
         ]
     )
 
-    # Check dependencies
     def _check_dependencies():
-        required_tools = ['muscle', 'blastn', 'meme', 'fastqc']
+        required_tools = ['muscle', 'samtools', 'minimap2']
         if args.local_blast:
-            required_tools.extend(['blastx', 'blastp'])
+            required_tools.extend(['blastn', 'blastx', 'blastp'])
         if args.call_variants:
             required_tools.append('bcftools')
         if args.find_motifs:
@@ -823,7 +835,6 @@ def main():
 
     _check_dependencies()
 
-    # Dry run mode
     if args.dry_run:
         logger.info("Dry run mode: No commands will be executed.")
         return
@@ -834,7 +845,6 @@ def main():
     except Exception as e:
         logger.critical(f"Pipeline failed: {str(e)}")
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()
